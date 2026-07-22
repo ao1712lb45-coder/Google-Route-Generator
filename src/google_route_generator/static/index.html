@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Google Route Generator｜智慧行程路線工作台</title>
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    :root{--ink:#172235;--muted:#667085;--line:#dce3ea;--paper:#fff;--bg:#f2f6f7;--brand:#0d6b66;--accent:#ef9e3e;--danger:#c2413a}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:"Microsoft JhengHei",system-ui,sans-serif}
+    header{height:72px;padding:0 24px;background:#113b3a;color:white;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 12px #0002}
+    .brand{font-size:19px;font-weight:800;letter-spacing:.3px}.brand small{display:block;font-size:11px;font-weight:500;opacity:.72;margin-top:3px}
+    .badge{font-size:12px;border:1px solid #ffffff55;border-radius:99px;padding:7px 11px}
+    main{height:calc(100vh - 72px);display:grid;grid-template-columns:430px 1fr;gap:0}.panel{overflow:auto;padding:20px;border-right:1px solid var(--line);background:#f8fafb}
+    .card{background:var(--paper);border:1px solid var(--line);border-radius:15px;padding:17px;margin-bottom:14px;box-shadow:0 5px 18px #23313c0c}
+    h1{font-size:23px;margin:0 0 6px}h2{font-size:15px;margin:0 0 12px}.lead{font-size:13px;color:var(--muted);line-height:1.6;margin:0 0 15px}
+    .drop{border:2px dashed #9bb8b6;border-radius:12px;padding:20px;text-align:center;background:#f5fbfa;cursor:pointer;transition:.2s}.drop.drag{border-color:var(--brand);background:#e8f6f4}.drop strong{display:block;margin-bottom:5px}.drop span{font-size:12px;color:var(--muted)}
+    button{border:0;border-radius:9px;padding:10px 13px;font-weight:700;cursor:pointer;font-family:inherit}.primary{background:var(--brand);color:white;width:100%;margin-top:11px}.primary:disabled{opacity:.45;cursor:not-allowed}.ghost{background:#eef3f4;color:#264c4a}.danger{background:#fff0ef;color:var(--danger)}
+    .status{font-size:12px;padding:10px 12px;border-radius:9px;background:#eef3f4;margin-top:11px;line-height:1.5}.status.error{background:#fff0ef;color:#9f312c}.status.ok{background:#eaf7f2;color:#12624e}
+    .day{border-left:5px solid var(--day);padding-left:12px}.day-head{display:flex;justify-content:space-between;gap:10px}.day-title{font-size:14px;font-weight:800}.day-meta{font-size:11px;color:var(--muted);margin-top:3px}.stop{display:grid;grid-template-columns:24px 1fr 30px;gap:7px;align-items:start;margin-top:11px}.num{width:24px;height:24px;background:var(--day);color:white;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:800}
+    input{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 9px;font:12px inherit;color:var(--ink)}input+input{margin-top:5px;color:var(--muted)}.remove{width:30px;height:30px;padding:0;background:#f5f6f7;color:#89939e}
+    .route-summary{margin-top:12px;padding:9px 10px;background:#f7f8fa;border-radius:8px;font-size:12px;font-weight:700}.warn{color:#a95f0b}.map-wrap{position:relative}#map{height:100%;width:100%;background:#dce8e6}.map-note{position:absolute;z-index:500;left:16px;bottom:16px;background:#fffef2eF;border:1px solid #e8d28c;padding:8px 11px;border-radius:8px;font-size:11px;color:#65511b;box-shadow:0 2px 10px #0002}
+    .empty{position:absolute;z-index:400;inset:0;display:grid;place-items:center;pointer-events:none}.empty div{background:#ffffffdd;border:1px solid var(--line);padding:20px 24px;border-radius:14px;text-align:center;box-shadow:0 8px 30px #0001}.empty b{display:block;margin-bottom:6px}.empty span{font-size:12px;color:var(--muted)}
+    .leaflet-popup-content{font-family:"Microsoft JhengHei",sans-serif}.marker-label{color:white;border:3px solid white;border-radius:50%;width:32px;height:32px;display:grid;place-items:center;font-weight:800;box-shadow:0 2px 8px #0005}
+    @media(max-width:850px){header{height:64px}.badge{display:none}main{height:auto;display:block}.panel{height:auto;border:0}.map-wrap{height:65vh}#map{height:65vh}}
+  </style>
+</head>
+<body>
+<header><div class="brand">Google Route Generator<small>PDF 智慧路線工作台</small></div><div class="badge">座標・實際道路・距離・預估車程</div></header>
+<main>
+  <aside class="panel">
+    <section class="card">
+      <h1>把行程表變成路線圖</h1>
+      <p class="lead">上傳旅行社 PDF，系統會先找出每日景點。你可以修正名稱，再查詢座標與實際開車路線。</p>
+      <div class="drop" id="drop"><strong id="fileLabel">選擇或拖入 PDF</strong><span>支援含文字的 PDF，最大 20 MB</span></div>
+      <input id="file" type="file" accept="application/pdf" hidden>
+      <button class="primary" id="parse">解析行程 PDF</button>
+      <div class="status" id="status">等待上傳行程表。</div>
+    </section>
+    <div id="days"></div>
+    <button class="primary" id="route" disabled>查座標並計算道路路線</button>
+  </aside>
+  <section class="map-wrap">
+    <div id="map"></div>
+    <div class="empty" id="empty"><div><b>尚未產生路線</b><span>請先上傳 PDF，確認每日景點後開始計算。</span></div></div>
+    <div class="map-note">車程與距離來自道路路線服務，僅供行程規劃參考。</div>
+  </section>
+</main>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const colors=['#0b84f3','#ed7d31','#7b4ab5','#169873','#d3425f','#8c6d24'];
+const $=id=>document.getElementById(id);let parsed=null,layers=[];
+const map=L.map('map',{zoomControl:true}).setView([52.2,5.3],8);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);
+function message(text,type=''){const el=$('status');el.textContent=text;el.className='status '+type}
+$('drop').onclick=()=>$('file').click();$('file').onchange=e=>selectFile(e.target.files[0]);
+['dragenter','dragover'].forEach(type=>$('drop').addEventListener(type,e=>{e.preventDefault();$('drop').classList.add('drag')}));
+['dragleave','drop'].forEach(type=>$('drop').addEventListener(type,e=>{e.preventDefault();$('drop').classList.remove('drag')}));
+$('drop').addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f){$('file').files=e.dataTransfer.files;selectFile(f)}});
+function selectFile(file){$('fileLabel').textContent=file?file.name:'選擇或拖入 PDF';message(file?'已選擇檔案，請按「解析行程 PDF」。':'等待上傳行程表。')}
+$('parse').onclick=async()=>{const file=$('file').files[0];if(!file)return message('請先選擇 PDF。','error');const fd=new FormData();fd.append('file',file);toggle(true,'正在讀取 PDF 與辨識每日景點…');try{const res=await fetch('/api/parse',{method:'POST',body:fd});const data=await res.json();if(!res.ok)throw Error(data.detail||'解析失敗');parsed=data;renderDays();$('route').disabled=false;message(`已辨識「${data.title}」，請確認景點名稱後計算路線。`,'ok')}catch(e){message(e.message,'error')}finally{toggle(false)}};
+function toggle(busy,text){$('parse').disabled=busy;$('route').disabled=busy||!parsed;if(text)message(text)}
+function renderDays(){const root=$('days');root.innerHTML='';parsed.days.forEach((day,di)=>{const color=colors[di%colors.length],card=document.createElement('section');card.className='card day';card.style.setProperty('--day',color);card.dataset.day=di;card.innerHTML=`<div class="day-head"><div><div class="day-title">第 ${day.day} 天</div><div class="day-meta">${escapeHtml(day.title)}</div></div><button class="ghost add">＋景點</button></div><div class="stops"></div><div class="route-summary">尚未計算</div>`;root.appendChild(card);day.stops.forEach((s,si)=>addStop(card,s,si));card.querySelector('.add').onclick=()=>{day.stops.push({name:'',query:'',status:'pending'});addStop(card,day.stops.at(-1),day.stops.length-1)}})}
+function addStop(card,stop,index){const row=document.createElement('div');row.className='stop';row.innerHTML=`<div class="num">${index+1}</div><div><input class="name" value="${attr(stop.name)}" aria-label="景點名稱"><input class="query" value="${attr(stop.query)}" aria-label="座標搜尋文字"></div><button class="remove" title="移除">×</button>`;card.querySelector('.stops').appendChild(row);row.querySelector('.remove').onclick=()=>row.remove()}
+function collect(){return{days:[...document.querySelectorAll('.day')].map((card,di)=>({day:parsed.days[di].day,title:parsed.days[di].title,stops:[...card.querySelectorAll('.stop')].map(row=>({name:row.querySelector('.name').value.trim(),query:row.querySelector('.query').value.trim()})).filter(s=>s.name&&s.query)}))}}
+$('route').onclick=async()=>{const body=collect();toggle(true,'正在查詢座標與道路路線，可能需要半分鐘…');try{const res=await fetch('/api/routes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const data=await res.json();if(!res.ok)throw Error(data.detail||'路線計算失敗');draw(data);message('路線計算完成。可修改搜尋名稱後再次計算。','ok')}catch(e){message(e.message,'error')}finally{toggle(false)}};
+function draw(data){layers.forEach(x=>map.removeLayer(x));layers=[];const bounds=[];data.days.forEach((day,di)=>{const color=colors[di%colors.length],card=document.querySelector(`.day[data-day="${di}"]`),located=day.stops.filter(s=>s.status==='located');day.stops.forEach((s,si)=>{if(s.status!=='located')return;const icon=L.divIcon({className:'',html:`<div class="marker-label" style="background:${color}">${si+1}</div>`,iconSize:[32,32],iconAnchor:[16,16]});const marker=L.marker([s.latitude,s.longitude],{icon}).bindPopup(`<b>第 ${day.day} 天｜${escapeHtml(s.name)}</b><br><small>${escapeHtml(s.display_name||s.query)}</small>`).addTo(map);layers.push(marker);bounds.push([s.latitude,s.longitude])});if(day.route&&day.route.geometry){const line=L.geoJSON(day.route.geometry,{style:{color,weight:5,opacity:.82}}).addTo(map);layers.push(line);card.querySelector('.route-summary').innerHTML=`道路距離 ${day.route.distance_km} km ・ 預估車程 ${formatTime(day.route.duration_minutes)} ・ ${located.length} 個定位點`}else{const unresolved=day.stops.filter(s=>s.status!=='located').length;card.querySelector('.route-summary').innerHTML=`<span class="warn">無法建立路線${unresolved?'，'+unresolved+' 個地點待修正':''}</span>`}});if(bounds.length){map.fitBounds(bounds,{padding:[40,40]});$('empty').style.display='none'}}
+function formatTime(min){return min>=60?`${Math.floor(min/60)} 小時 ${min%60} 分`:`${min} 分鐘`}
+function escapeHtml(v){return String(v||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}function attr(v){return escapeHtml(v)}
+</script>
+</body></html>
