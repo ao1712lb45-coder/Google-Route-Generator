@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 from .itinerary import parse_itinerary
@@ -16,6 +17,7 @@ from .services import MapServices
 
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_PDF_BYTES = 20 * 1024 * 1024
+load_dotenv()
 app = FastAPI(title="Google Route Generator", version="0.2.0")
 services = MapServices()
 
@@ -40,6 +42,11 @@ class RouteRequest(BaseModel):
 @app.get("/")
 def index():
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/api/providers")
+def providers():
+    return services.provider_status()
 
 
 @app.post("/api/parse")

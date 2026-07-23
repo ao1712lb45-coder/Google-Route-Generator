@@ -43,7 +43,14 @@ route-map itinerary.pdf --output trip-map.html
 route-map-web
 ```
 
-網頁使用 OpenStreetMap Nominatim 查詢座標，並使用 OSRM 計算道路路線；不需要 Google Maps API 金鑰。
+網頁採用免費服務優先與自動備援：
+
+- 設定 `GEOAPIFY_API_KEY` 時，優先使用 Geoapify 搜尋景點與座標。
+- 設定 `OPENROUTESERVICE_API_KEY` 時，優先使用 openrouteservice 計算道路與車程。
+- 未設定金鑰或服務暫時失敗時，自動改用 OpenStreetMap Nominatim 與 OSRM。
+- 座標結果會儲存在 `.cache/locations.json`，避免重複使用免費額度。
+
+將 `.env.example` 複製為 `.env`，再填入免費 API Key。請勿將 `.env` 上傳至 GitHub。
 
 Geocoding uses a public service by default. For production or higher-volume use,
 provide a commercial geocoder by implementing the `Geocoder` protocol.
