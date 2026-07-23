@@ -50,6 +50,11 @@ def providers():
     return services.provider_status()
 
 
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+
+
 @app.post("/api/parse")
 def parse_document(file: UploadFile = File(...)):
     suffix = Path(file.filename or "").suffix.lower()

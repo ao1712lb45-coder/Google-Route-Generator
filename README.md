@@ -78,3 +78,11 @@ tests/                       automated tests
 pytest
 ruff check .
 ```
+
+## Render 部署
+
+專案根目錄已提供 `render.yaml`，可在 Render 建立 Blueprint，或建立 Python Web Service：
+
+- Build Command：`pip install .`
+- Start Command：`uvicorn google_route_generator.web:app --host 0.0.0.0 --port $PORT`
+- Health Check Path：`/api/health`

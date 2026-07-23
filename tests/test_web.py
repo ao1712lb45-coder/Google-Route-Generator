@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from google_route_generator.web import DayRequest, RouteRequest, StopRequest
+from google_route_generator.web import DayRequest, RouteRequest, StopRequest, health
 
 
 def make_stops(count: int) -> list[StopRequest]:
@@ -28,3 +28,7 @@ def test_route_request_accepts_fourteen_days() -> None:
 def test_route_request_rejects_more_than_fourteen_days() -> None:
     with pytest.raises(ValidationError):
         RouteRequest(days=[DayRequest(day=index + 1, stops=[]) for index in range(15)])
+
+
+def test_health_endpoint_payload() -> None:
+    assert health() == {"status": "ok"}
