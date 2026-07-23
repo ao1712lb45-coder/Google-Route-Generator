@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: google-route-generator
+    runtime: python
+    plan: free
+    branch: agent/build-route-web-app
+    buildCommand: pip install .
+    startCommand: uvicorn google_route_generator.web:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
