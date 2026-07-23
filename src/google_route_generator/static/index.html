@@ -28,7 +28,7 @@
   </style>
 </head>
 <body>
-<header><div class="brand">Google Route Generator<small>PDF 智慧路線工作台</small></div><div class="badge" id="providers">正在確認免費地圖服務…</div></header>
+<header><div class="brand">Google Route Generator<small>PDF／Word 智慧路線工作台</small></div><div class="badge" id="providers">正在確認免費地圖服務…</div></header>
 <main>
   <aside class="panel">
     <section class="card manual-card">
@@ -42,12 +42,12 @@
       <div class="big-summary" id="manualSummary" hidden></div>
     </section>
     <details class="card pdf-section">
-      <summary>從 PDF 自動匯入多日行程</summary>
+      <summary>從 PDF／Word 自動匯入多日行程</summary>
       <div class="pdf-body">
-        <p class="lead">上傳旅行社 PDF，自動找出每日景點；匯入後仍可修改。</p>
-        <div class="drop" id="drop"><strong id="fileLabel">選擇或拖入 PDF</strong><span>支援含文字的 PDF，最大 20 MB</span></div>
-        <input id="file" type="file" accept="application/pdf" hidden>
-        <button class="primary" id="parse">解析行程 PDF</button>
+        <p class="lead">上傳旅行社 PDF 或 Word .docx，自動找出每日景點；匯入後仍可修改。</p>
+        <div class="drop" id="drop"><strong id="fileLabel">選擇或拖入 PDF／Word</strong><span>支援 PDF、Word .docx，最大 20 MB</span></div>
+        <input id="file" type="file" accept="application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.pdf,.docx" hidden>
+        <button class="primary" id="parse">解析行程文件</button>
         <div class="status" id="status">等待上傳行程表。</div>
       </div>
     </details>
@@ -77,8 +77,8 @@ $('drop').onclick=()=>$('file').click();$('file').onchange=e=>selectFile(e.targe
 ['dragenter','dragover'].forEach(type=>$('drop').addEventListener(type,e=>{e.preventDefault();$('drop').classList.add('drag')}));
 ['dragleave','drop'].forEach(type=>$('drop').addEventListener(type,e=>{e.preventDefault();$('drop').classList.remove('drag')}));
 $('drop').addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f){$('file').files=e.dataTransfer.files;selectFile(f)}});
-function selectFile(file){$('fileLabel').textContent=file?file.name:'選擇或拖入 PDF';message(file?'已選擇檔案，請按「解析行程 PDF」。':'等待上傳行程表。')}
-$('parse').onclick=async()=>{const file=$('file').files[0];if(!file)return message('請先選擇 PDF。','error');const fd=new FormData();fd.append('file',file);toggle(true,'正在讀取 PDF 與辨識每日景點…');try{const res=await fetch('/api/parse',{method:'POST',body:fd});const data=await res.json();if(!res.ok)throw Error(data.detail||'解析失敗');parsed=data;renderDays();$('route').disabled=false;message(`已辨識「${data.title}」，請確認景點名稱後計算路線。`,'ok')}catch(e){message(e.message,'error')}finally{toggle(false)}};
+function selectFile(file){$('fileLabel').textContent=file?file.name:'選擇或拖入 PDF／Word';message(file?'已選擇檔案，請按「解析行程文件」。':'等待上傳行程表。')}
+$('parse').onclick=async()=>{const file=$('file').files[0];if(!file)return message('請先選擇 PDF 或 Word .docx。','error');const fd=new FormData();fd.append('file',file);toggle(true,'正在讀取文件與辨識每日景點…');try{const res=await fetch('/api/parse',{method:'POST',body:fd});const data=await res.json();if(!res.ok)throw Error(data.detail||'解析失敗');parsed=data;renderDays();$('route').disabled=false;message(`已辨識「${data.title}」，請確認景點名稱後計算路線。`,'ok')}catch(e){message(e.message,'error')}finally{toggle(false)}};
 function toggle(busy,text){$('parse').disabled=busy;$('route').disabled=busy||!parsed;if(text)message(text)}
 function renderDays(){const root=$('days');root.innerHTML='';parsed.days.forEach((day,di)=>{const color=colors[di%colors.length],card=document.createElement('section');card.className='card day';card.style.setProperty('--day',color);card.dataset.day=di;card.innerHTML=`<div class="day-head"><div><div class="day-title">第 ${day.day} 天</div><div class="day-meta">${escapeHtml(day.title)}</div></div><button class="ghost add">＋景點</button></div><div class="stops"></div><div class="route-summary">尚未計算</div>`;root.appendChild(card);day.stops.forEach((s,si)=>addStop(card,s,si));card.querySelector('.add').onclick=()=>{day.stops.push({name:'',query:'',status:'pending'});addStop(card,day.stops.at(-1),day.stops.length-1)}})}
 function addStop(card,stop,index){const row=document.createElement('div');row.className='stop';row.innerHTML=`<div class="num">${index+1}</div><div><input class="name" value="${attr(stop.name)}" aria-label="景點名稱"><input class="query" value="${attr(stop.query)}" aria-label="座標搜尋文字"></div><button class="remove" title="移除">×</button>`;card.querySelector('.stops').appendChild(row);row.querySelector('.remove').onclick=()=>row.remove()}

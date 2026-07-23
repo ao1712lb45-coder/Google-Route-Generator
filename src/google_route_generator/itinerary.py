@@ -1,10 +1,12 @@
-"""Parse itinerary PDFs into editable day-by-day route candidates."""
+"""Parse PDF and Word itineraries into editable day-by-day route candidates."""
 
 from __future__ import annotations
 
 import re
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from xml.etree import ElementTree
 
 from pypdf import PdfReader
 
@@ -64,8 +66,33 @@ def extract_pdf_text(path: Path) -> str:
     return "\n".join(page.extract_text() or "" for page in reader.pages)
 
 
+def extract_docx_text(path: Path) -> str:
+    """Extract paragraphs and table cells from a modern Word document."""
+    try:
+        with zipfile.ZipFile(path) as archive:
+            document_xml = archive.read("word/document.xml")
+    except (KeyError, zipfile.BadZipFile) as error:
+        raise ValueError("無法讀取 Word 文件，請確認檔案是有效的 .docx。") from error
+
+    root = ElementTree.fromstring(document_xml)
+    namespace = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    lines: list[str] = []
+    for paragraph in root.iter(f"{namespace}p"):
+        text = "".join(node.text or "" for node in paragraph.iter(f"{namespace}t"))
+        clean = " ".join(text.split())
+        if clean:
+            lines.append(clean)
+    return "\n".join(lines)
+
+
 def parse_itinerary(path: Path) -> dict:
-    text = extract_pdf_text(path)
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
+        text = extract_pdf_text(path)
+    elif suffix == ".docx":
+        text = extract_docx_text(path)
+    else:
+        raise ValueError("僅支援 PDF 與 Word .docx 文件。")
     title = _extract_title(text)
     days = _extract_days(text)
     return {"title": title, "days": [day.as_dict() for day in days]}

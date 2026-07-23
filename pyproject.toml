@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "google-route-generator"
 version = "0.2.0"
-description = "Generate professional travel route maps from itinerary PDFs."
+description = "Generate professional travel route maps from PDF and Word itineraries."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

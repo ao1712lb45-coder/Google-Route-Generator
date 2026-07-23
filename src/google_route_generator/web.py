@@ -16,7 +16,8 @@ from .services import MapServices
 
 
 STATIC_DIR = Path(__file__).parent / "static"
-MAX_PDF_BYTES = 20 * 1024 * 1024
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+ALLOWED_UPLOAD_SUFFIXES = {".pdf", ".docx"}
 load_dotenv()
 app = FastAPI(title="Google Route Generator", version="0.2.0")
 services = MapServices()
@@ -50,18 +51,22 @@ def providers():
 
 
 @app.post("/api/parse")
-def parse_pdf(file: UploadFile = File(...)):
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(400, "請上傳 PDF 行程檔。")
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as handle:
+def parse_document(file: UploadFile = File(...)):
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in ALLOWED_UPLOAD_SUFFIXES:
+        raise HTTPException(400, "請上傳 PDF 或 Word .docx 行程檔。")
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
         temp_path = Path(handle.name)
         shutil.copyfileobj(file.file, handle)
     try:
-        if temp_path.stat().st_size > MAX_PDF_BYTES:
-            raise HTTPException(413, "PDF 超過 20 MB。")
-        result = parse_itinerary(temp_path)
+        if temp_path.stat().st_size > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "檔案超過 20 MB。")
+        try:
+            result = parse_itinerary(temp_path)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
         if not result["days"]:
-            raise HTTPException(422, "無法辨識每日行程，請確認 PDF 內含可選取文字。")
+            raise HTTPException(422, "無法辨識每日行程，請確認文件內含可讀取文字。")
         return result
     finally:
         temp_path.unlink(missing_ok=True)
