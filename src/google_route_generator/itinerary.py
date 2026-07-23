@@ -187,7 +187,7 @@ def _clean_lodging(value: str) -> str:
 
 def _split_heading_stops(route_line: str) -> list[str]:
     route_line = re.sub(r"\b[A-Z]{3}\s*/\s*[A-Z]{3}\b.*$", "", route_line).strip()
-    primary_segments = re.split(r"\s*(?:－|—|–|-|→)\s*", route_line)
+    primary_segments = re.split(r"\s*(?:－|—|–|-|→|／)\s*", route_line)
     results: list[str] = []
     for segment in primary_segments:
         flight_parts = re.split(r"\s*✈\s*", segment)

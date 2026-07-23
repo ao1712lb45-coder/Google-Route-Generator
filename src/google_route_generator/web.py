@@ -6,6 +6,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
+import requests
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
@@ -13,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from .itinerary import parse_itinerary
 from .services import MapServices
+from .web_itinerary import fetch_web_itinerary
 
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -38,6 +40,10 @@ class DayRequest(BaseModel):
 
 class RouteRequest(BaseModel):
     days: list[DayRequest] = Field(max_length=14)
+
+
+class UrlRequest(BaseModel):
+    url: str = Field(min_length=10, max_length=2048)
 
 
 @app.get("/")
@@ -75,6 +81,19 @@ def parse_document(file: UploadFile = File(...)):
         return result
     finally:
         temp_path.unlink(missing_ok=True)
+
+
+@app.post("/api/parse-url")
+def parse_url(request: UrlRequest):
+    try:
+        result = fetch_web_itinerary(request.url)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+    except requests.RequestException as error:
+        raise HTTPException(502, "無法讀取行程網址，請確認網址公開且可正常開啟。") from error
+    if not result["days"]:
+        raise HTTPException(422, "找不到每日行程，請確認網址是公開的行程詳細頁。")
+    return result
 
 
 @app.post("/api/routes")
