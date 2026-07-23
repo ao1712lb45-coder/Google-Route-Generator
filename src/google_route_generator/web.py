@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 from .itinerary import parse_itinerary
-from .services import MapServices
+from .services import MapServices, select_coherent_locations
 from .web_itinerary import fetch_web_itinerary
 
 
@@ -100,22 +100,27 @@ def parse_url(request: UrlRequest):
 def build_routes(request: RouteRequest):
     output_days = []
     for day in request.days:
-        stops = []
-        for stop in day.stops:
-            item = stop.model_dump()
+        stops = [stop.model_dump() for stop in day.stops]
+        candidate_groups = []
+        for item in stops:
+            if item["latitude"] is not None and item["longitude"] is not None:
+                candidate_groups.append([item.copy()])
+                continue
+            try:
+                candidate_groups.append(services.geocode_candidates(item["query"]))
+            except Exception:
+                candidate_groups.append([])
+        selected = select_coherent_locations(
+            candidate_groups, [item["name"] for item in stops]
+        )
+        for item, location in zip(stops, selected):
             if item["latitude"] is None or item["longitude"] is None:
-                try:
-                    location = services.geocode(item["query"])
-                except Exception as error:
-                    item.update(status="error", note=f"座標服務失敗：{error.__class__.__name__}")
+                if location:
+                    item.update(location, status="located", note="")
                 else:
-                    if location:
-                        item.update(location, status="located", note="")
-                    else:
-                        item.update(status="unresolved", note="找不到座標，請修改搜尋名稱。")
+                    item.update(status="unresolved", note="找不到地點，請補充國家或城市。")
             else:
                 item.update(status="located", note="使用已確認座標")
-            stops.append(item)
         try:
             route = services.route(stops)
         except Exception as error:
