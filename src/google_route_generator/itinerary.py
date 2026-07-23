@@ -56,9 +56,15 @@ class ParsedDay:
     day: int
     title: str
     stops: list[ParsedStop] = field(default_factory=list)
+    lodging: str = ""
 
     def as_dict(self) -> dict:
-        return {"day": self.day, "title": self.title, "stops": [stop.as_dict() for stop in self.stops]}
+        return {
+            "day": self.day,
+            "title": self.title,
+            "lodging": self.lodging,
+            "stops": [stop.as_dict() for stop in self.stops],
+        }
 
 
 def extract_pdf_text(path: Path) -> str:
@@ -90,12 +96,122 @@ def parse_itinerary(path: Path) -> dict:
     if suffix == ".pdf":
         text = extract_pdf_text(path)
     elif suffix == ".docx":
+        structured = _parse_docx_table_itinerary(path)
+        if structured["days"]:
+            return structured
         text = extract_docx_text(path)
     else:
         raise ValueError("僅支援 PDF 與 Word .docx 文件。")
     title = _extract_title(text)
     days = _extract_days(text)
     return {"title": title, "days": [day.as_dict() for day in days]}
+
+
+def _parse_docx_table_itinerary(path: Path) -> dict:
+    text = extract_docx_text(path)
+    rows = _extract_docx_table_rows(path)
+    has_explicit_days = any(cells and DAY_PATTERN.search(cells[0]) for cells in rows)
+    days_by_number: dict[int, ParsedDay] = {}
+    current_day: int | None = None
+
+    for cells in rows:
+        if not cells:
+            continue
+        day_match = DAY_PATTERN.search(cells[0])
+        if day_match:
+            current_day = int(day_match.group(1))
+
+        content = cells[-1].strip()
+        if not content or DAY_PATTERN.fullmatch(content):
+            continue
+        is_lodging = content.startswith("住宿：")
+        is_meal = bool(MEAL_PATTERN.match(content)) and not is_lodging
+        if not has_explicit_days and not is_meal and not is_lodging:
+            current_day = (current_day or 0) + 1
+        if current_day is None:
+            continue
+        day = days_by_number.setdefault(current_day, ParsedDay(day=current_day, title=""))
+        if is_meal:
+            continue
+        if is_lodging:
+            day.lodging = _clean_lodging(content)
+        elif not day.title:
+            day.title = content
+
+    days = [days_by_number[number] for number in sorted(days_by_number) if days_by_number[number].title]
+    for index, day in enumerate(days):
+        previous_lodging = days[index - 1].lodging if index else ""
+        names = _split_heading_stops(day.title)
+        names = [day.lodging if name == "飯店" and day.lodging else name for name in names]
+        if previous_lodging:
+            names.insert(0, previous_lodging)
+        names = _deduplicate(names)
+        day.stops = [ParsedStop(name=name, query=name) for name in names]
+
+    return {"title": _extract_title(text), "days": [day.as_dict() for day in days]}
+
+
+def _extract_docx_table_rows(path: Path) -> list[list[str]]:
+    with zipfile.ZipFile(path) as archive:
+        root = ElementTree.fromstring(archive.read("word/document.xml"))
+    namespace = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    table_candidates: list[tuple[int, list[list[str]]]] = []
+    for table in root.iter(f"{namespace}tbl"):
+        rows: list[list[str]] = []
+        day_markers = 0
+        for row in table.findall(f"{namespace}tr"):
+            cells = []
+            for cell_index, cell in enumerate(row.findall(f"{namespace}tc")):
+                if cell_index == 0:
+                    text = "".join(node.text or "" for node in cell.iter(f"{namespace}t"))
+                else:
+                    paragraphs = cell.findall(f"{namespace}p")
+                    text = " ".join(
+                        "".join(node.text or "" for node in paragraph.iter(f"{namespace}t"))
+                        for paragraph in paragraphs
+                    )
+                clean = " ".join(text.split())
+                cells.append(clean)
+                if DAY_PATTERN.search(clean):
+                    day_markers += 1
+            rows.append(cells)
+        table_candidates.append((day_markers, rows))
+    return max(table_candidates, key=lambda item: item[0], default=(0, []))[1]
+
+
+def _clean_lodging(value: str) -> str:
+    value = re.sub(r"^住宿\s*[:：]\s*", "", value).strip()
+    value = re.split(r"\s*或\s*", value, maxsplit=1)[0]
+    return re.sub(r"\s*或?同級\s*$", "", value).strip()
+
+
+def _split_heading_stops(route_line: str) -> list[str]:
+    route_line = re.sub(r"\b[A-Z]{3}\s*/\s*[A-Z]{3}\b.*$", "", route_line).strip()
+    primary_segments = re.split(r"\s*(?:－|—|–|-|→)\s*", route_line)
+    results: list[str] = []
+    for segment in primary_segments:
+        flight_parts = re.split(r"\s*✈\s*", segment)
+        for flight_part in flight_parts:
+            name = flight_part.strip()
+            if "～" in name or "~" in name:
+                left, right = re.split(r"[～~]", name, maxsplit=1)
+                name = right if "★" in right else left
+            name = re.sub(r"^[★☆・\s]+", "", name)
+            name = re.sub(r"【[^】]*】", "", name)
+            name = re.sub(r"\([^)]*\)|（[^）]*）", "", name)
+            name = " ".join(name.strip(" 、,，:：").split())
+            if not name or _is_non_location(name) or name in {"全日自由活動", "自由活動"}:
+                continue
+            results.append(name)
+    return _deduplicate(results)
+
+
+def _deduplicate(values: list[str]) -> list[str]:
+    results: list[str] = []
+    for value in values:
+        if not results or results[-1].casefold() != value.casefold():
+            results.append(value)
+    return results
 
 
 def _extract_title(text: str) -> str:
