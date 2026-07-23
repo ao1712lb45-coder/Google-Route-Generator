@@ -99,6 +99,9 @@ def parse_url(request: UrlRequest):
 @app.post("/api/routes")
 def build_routes(request: RouteRequest):
     output_days = []
+    preferred_country = _infer_destination_country(
+        [stop.name for day in request.days for stop in day.stops]
+    )
     for day in request.days:
         stops = [stop.model_dump() for stop in day.stops]
         candidate_groups = []
@@ -107,7 +110,10 @@ def build_routes(request: RouteRequest):
                 candidate_groups.append([item.copy()])
                 continue
             try:
-                candidate_groups.append(services.geocode_candidates(item["query"]))
+                country = None if _is_airport(item["name"]) else preferred_country
+                candidate_groups.append(
+                    services.geocode_candidates(item["query"], preferred_country=country)
+                )
             except Exception:
                 candidate_groups.append([])
         selected = select_coherent_locations(
@@ -127,6 +133,30 @@ def build_routes(request: RouteRequest):
             route = {"error": f"道路服務失敗：{error.__class__.__name__}"}
         output_days.append({"day": day.day, "title": day.title, "stops": stops, "route": route})
     return {"days": output_days}
+
+
+def _is_airport(name: str) -> bool:
+    lowered = name.lower()
+    return any(token in lowered for token in ("機場", "空港", "airport"))
+
+
+def _infer_destination_country(stop_names: list[str]) -> str | None:
+    country_tokens = {
+        "jp": (
+            "日本", "東京", "成田", "羽田", "鎌倉", "江之島", "品川", "淺草",
+            "雷門", "仲見世", "富士", "大阪", "京都", "沖繩", "那霸", "北海道",
+        ),
+        "tw": ("台灣", "台北", "桃園", "台中", "高雄", "花蓮"),
+        "nl": ("荷蘭", "阿姆斯特丹", "鹿特丹", "海牙"),
+    }
+    scores = {country: 0 for country in country_tokens}
+    for name in stop_names:
+        if _is_airport(name):
+            continue
+        for country, tokens in country_tokens.items():
+            scores[country] += sum(token in name for token in tokens)
+    country, score = max(scores.items(), key=lambda item: item[1])
+    return country if score else None
 
 
 def run() -> None:
