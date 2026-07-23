@@ -99,6 +99,7 @@ def parse_url(request: UrlRequest):
 @app.post("/api/routes")
 def build_routes(request: RouteRequest):
     output_days = []
+    has_pending_confirmation = False
     preferred_country = _infer_destination_country(
         [stop.name for day in request.days for stop in day.stops]
     )
@@ -111,28 +112,65 @@ def build_routes(request: RouteRequest):
                 continue
             try:
                 country = None if _is_airport(item["name"]) else preferred_country
+                search_query, rewritten = _formalize_place_query(item["query"])
                 candidate_groups.append(
-                    services.geocode_candidates(item["query"], preferred_country=country)
+                    services.geocode_candidates(search_query, preferred_country=country)
                 )
+                item["search_query"] = search_query
+                item["rewritten"] = rewritten
             except Exception:
                 candidate_groups.append([])
         selected = select_coherent_locations(
             candidate_groups, [item["name"] for item in stops]
         )
-        for item, location in zip(stops, selected):
+        day_needs_confirmation = False
+        for item, location, candidates in zip(stops, selected, candidate_groups):
             if item["latitude"] is None or item["longitude"] is None:
                 if location:
-                    item.update(location, status="located", note="")
+                    needs_confirmation = _needs_place_confirmation(
+                        item["name"], item.get("rewritten", False)
+                    )
+                    item.update(
+                        location,
+                        status="needs_confirmation" if needs_confirmation else "located",
+                        note="請確認正式景點" if needs_confirmation else "",
+                        candidates=candidates,
+                    )
+                    day_needs_confirmation = day_needs_confirmation or needs_confirmation
                 else:
                     item.update(status="unresolved", note="找不到地點，請補充國家或城市。")
             else:
                 item.update(status="located", note="使用已確認座標")
-        try:
-            route = services.route(stops)
-        except Exception as error:
-            route = {"error": f"道路服務失敗：{error.__class__.__name__}"}
+        has_pending_confirmation = has_pending_confirmation or day_needs_confirmation
+        if day_needs_confirmation:
+            route = None
+        else:
+            try:
+                route = services.route(stops)
+            except Exception as error:
+                route = {"error": f"道路服務失敗：{error.__class__.__name__}"}
         output_days.append({"day": day.day, "title": day.title, "stops": stops, "route": route})
-    return {"days": output_days}
+    return {"days": output_days, "needs_confirmation": has_pending_confirmation}
+
+
+def _formalize_place_query(query: str) -> tuple[str, bool]:
+    clean = query.strip()
+    replacements = {
+        "鎌倉古街散策": "小町通 鎌倉",
+        "古都鎌倉大佛": "高德院 鎌倉大佛",
+        "淺草觀音寺": "淺草寺",
+        "雷門、仲見世商店街": "淺草寺 雷門 仲見世通",
+        "江之島電鐵": "江ノ島電鉄 鎌倉駅",
+    }
+    for description, official_query in replacements.items():
+        if description in clean:
+            return official_query, official_query != clean
+    return clean, False
+
+
+def _needs_place_confirmation(name: str, rewritten: bool) -> bool:
+    fuzzy_tokens = ("散策", "自由活動", "自由逛街", "免稅店", "古街", "周邊", "飯店")
+    return rewritten or any(token in name for token in fuzzy_tokens)
 
 
 def _is_airport(name: str) -> bool:
