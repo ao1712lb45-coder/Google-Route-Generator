@@ -32,7 +32,7 @@ class StopRequest(BaseModel):
 class DayRequest(BaseModel):
     day: int = Field(ge=1, le=60)
     title: str = ""
-    stops: list[StopRequest]
+    stops: list[StopRequest] = Field(max_length=20)
 
 
 class RouteRequest(BaseModel):
