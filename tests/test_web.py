@@ -1,7 +1,13 @@
 import pytest
 from pydantic import ValidationError
 
-from google_route_generator.web import DayRequest, RouteRequest, StopRequest, health
+from google_route_generator.web import (
+    DayRequest,
+    RouteRequest,
+    StopRequest,
+    _infer_destination_country,
+    health,
+)
 
 
 def make_stops(count: int) -> list[StopRequest]:
@@ -32,3 +38,9 @@ def test_route_request_rejects_more_than_fourteen_days() -> None:
 
 def test_health_endpoint_payload() -> None:
     assert health() == {"status": "ok"}
+
+
+def test_japan_itinerary_infers_destination_country() -> None:
+    stops = ["桃園國際機場", "成田國際空港", "鎌倉古街散策", "江之島電鐵", "淺草觀音寺"]
+
+    assert _infer_destination_country(stops) == "jp"
