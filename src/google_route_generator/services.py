@@ -27,17 +27,27 @@ class MapServices:
         candidates = self.geocode_candidates(query)
         return candidates[0] if candidates else None
 
-    def geocode_candidates(self, query: str, limit: int = 5) -> list[dict]:
+    def geocode_candidates(
+        self, query: str, limit: int = 5, preferred_country: str | None = None
+    ) -> list[dict]:
+        country = (preferred_country or "").strip().lower()
+        scoped_query = f"{query}|{country}" if country else query
         if self.geoapify_key:
             try:
                 result = self._cached_geocode(
-                    "geoapify-candidates", query, self._geoapify_candidates
+                    "geoapify-candidates",
+                    scoped_query,
+                    lambda _: self._geoapify_candidates(query, country),
                 )
                 if result:
                     return result[:limit]
             except requests.RequestException:
                 pass
-        result = self._cached_geocode("nominatim-candidates", query, self._nominatim_candidates)
+        result = self._cached_geocode(
+            "nominatim-candidates",
+            scoped_query,
+            lambda _: self._nominatim_candidates(query, country),
+        )
         return (result or [])[:limit]
 
     def route(self, stops: list[dict]) -> dict | None:
@@ -80,16 +90,19 @@ class MapServices:
             self._save_cache()
         return result
 
-    def _geoapify_candidates(self, query: str) -> list[dict]:
+    def _geoapify_candidates(self, query: str, country: str = "") -> list[dict]:
+        params = {
+            "text": query,
+            "format": "json",
+            "limit": 5,
+            "lang": "zh",
+            "apiKey": self.geoapify_key,
+        }
+        if country:
+            params["filter"] = f"countrycode:{country}"
         response = self.session.get(
             "https://api.geoapify.com/v1/geocode/search",
-            params={
-                "text": query,
-                "format": "json",
-                "limit": 5,
-                "lang": "zh",
-                "apiKey": self.geoapify_key,
-            },
+            params=params,
             timeout=20,
         )
         response.raise_for_status()
@@ -105,21 +118,24 @@ class MapServices:
             for row in rows
         ]
 
-    def _nominatim_candidates(self, query: str) -> list[dict]:
+    def _nominatim_candidates(self, query: str, country: str = "") -> list[dict]:
         with self.lock:
             delay = 1.05 - (time.monotonic() - self.last_nominatim_request)
             if delay > 0:
                 time.sleep(delay)
             self.last_nominatim_request = time.monotonic()
+        params = {
+            "q": query,
+            "format": "jsonv2",
+            "limit": 5,
+            "addressdetails": 1,
+            "accept-language": "zh-TW",
+        }
+        if country:
+            params["countrycodes"] = country
         response = self.session.get(
             "https://nominatim.openstreetmap.org/search",
-            params={
-                "q": query,
-                "format": "jsonv2",
-                "limit": 5,
-                "addressdetails": 1,
-                "accept-language": "zh-TW",
-            },
+            params=params,
             timeout=20,
         )
         response.raise_for_status()
