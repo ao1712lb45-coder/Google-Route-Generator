@@ -37,7 +37,7 @@ class DayRequest(BaseModel):
 
 
 class RouteRequest(BaseModel):
-    days: list[DayRequest]
+    days: list[DayRequest] = Field(max_length=14)
 
 
 @app.get("/")
