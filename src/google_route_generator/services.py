@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from math import isfinite
+from math import asin, cos, isfinite, radians, sin, sqrt
 from pathlib import Path
 from threading import Lock
 
@@ -24,14 +24,21 @@ class MapServices:
         self.last_nominatim_request = 0.0
 
     def geocode(self, query: str) -> dict | None:
+        candidates = self.geocode_candidates(query)
+        return candidates[0] if candidates else None
+
+    def geocode_candidates(self, query: str, limit: int = 5) -> list[dict]:
         if self.geoapify_key:
             try:
-                result = self._cached_geocode("geoapify", query, self._geoapify_geocode)
+                result = self._cached_geocode(
+                    "geoapify-candidates", query, self._geoapify_candidates
+                )
                 if result:
-                    return result
+                    return result[:limit]
             except requests.RequestException:
                 pass
-        return self._cached_geocode("nominatim", query, self._nominatim_geocode)
+        result = self._cached_geocode("nominatim-candidates", query, self._nominatim_candidates)
+        return (result or [])[:limit]
 
     def route(self, stops: list[dict]) -> dict | None:
         points = [
@@ -73,13 +80,13 @@ class MapServices:
             self._save_cache()
         return result
 
-    def _geoapify_geocode(self, query: str) -> dict | None:
+    def _geoapify_candidates(self, query: str) -> list[dict]:
         response = self.session.get(
             "https://api.geoapify.com/v1/geocode/search",
             params={
                 "text": query,
                 "format": "json",
-                "limit": 1,
+                "limit": 5,
                 "lang": "zh",
                 "apiKey": self.geoapify_key,
             },
@@ -87,16 +94,18 @@ class MapServices:
         )
         response.raise_for_status()
         rows = response.json().get("results", [])
-        if not rows:
-            return None
-        return {
-            "latitude": float(rows[0]["lat"]),
-            "longitude": float(rows[0]["lon"]),
-            "display_name": rows[0].get("formatted", query),
-            "provider": "Geoapify",
-        }
+        return [
+            {
+                "latitude": float(row["lat"]),
+                "longitude": float(row["lon"]),
+                "display_name": row.get("formatted", query),
+                "country_code": (row.get("country_code") or "").lower(),
+                "provider": "Geoapify",
+            }
+            for row in rows
+        ]
 
-    def _nominatim_geocode(self, query: str) -> dict | None:
+    def _nominatim_candidates(self, query: str) -> list[dict]:
         with self.lock:
             delay = 1.05 - (time.monotonic() - self.last_nominatim_request)
             if delay > 0:
@@ -104,19 +113,27 @@ class MapServices:
             self.last_nominatim_request = time.monotonic()
         response = self.session.get(
             "https://nominatim.openstreetmap.org/search",
-            params={"q": query, "format": "jsonv2", "limit": 1, "accept-language": "zh-TW"},
+            params={
+                "q": query,
+                "format": "jsonv2",
+                "limit": 5,
+                "addressdetails": 1,
+                "accept-language": "zh-TW",
+            },
             timeout=20,
         )
         response.raise_for_status()
         rows = response.json()
-        if not rows:
-            return None
-        return {
-            "latitude": float(rows[0]["lat"]),
-            "longitude": float(rows[0]["lon"]),
-            "display_name": rows[0].get("display_name", query),
-            "provider": "OpenStreetMap Nominatim",
-        }
+        return [
+            {
+                "latitude": float(row["lat"]),
+                "longitude": float(row["lon"]),
+                "display_name": row.get("display_name", query),
+                "country_code": row.get("address", {}).get("country_code", "").lower(),
+                "provider": "OpenStreetMap Nominatim",
+            }
+            for row in rows
+        ]
 
     def _openrouteservice_route(self, points: list[dict]) -> dict | None:
         response = self.session.post(
@@ -185,3 +202,59 @@ def _valid_coordinate(latitude, longitude) -> bool:
         and -90 <= latitude <= 90
         and -180 <= longitude <= 180
     )
+
+
+def select_coherent_locations(
+    candidate_groups: list[list[dict]], stop_names: list[str]
+) -> list[dict | None]:
+    """Choose a plausible candidate chain and avoid accidental border crossings."""
+    if not candidate_groups:
+        return []
+    groups: list[list[dict | None]] = [group or [None] for group in candidate_groups]
+    costs: list[list[float]] = []
+    parents: list[list[int | None]] = []
+    for index, candidates in enumerate(groups):
+        if index == 0:
+            costs.append([rank * 8.0 for rank in range(len(candidates))])
+            parents.append([None] * len(candidates))
+            continue
+        row_costs, row_parents = [], []
+        for rank, candidate in enumerate(candidates):
+            options = [
+                previous_cost
+                + rank * 8.0
+                + _transition_cost(previous, candidate, stop_names[index - 1], stop_names[index])
+                for previous_cost, previous in zip(costs[-1], groups[index - 1])
+            ]
+            best_parent = min(range(len(options)), key=options.__getitem__)
+            row_costs.append(options[best_parent])
+            row_parents.append(best_parent)
+        costs.append(row_costs)
+        parents.append(row_parents)
+    choice = min(range(len(costs[-1])), key=costs[-1].__getitem__)
+    selected: list[dict | None] = []
+    for index in range(len(groups) - 1, -1, -1):
+        selected.append(groups[index][choice])
+        if parents[index][choice] is not None:
+            choice = parents[index][choice]  # type: ignore[assignment]
+    return list(reversed(selected))
+
+
+def _transition_cost(first, second, first_name: str, second_name: str) -> float:
+    if first is None or second is None:
+        return 100_000.0
+    distance = _haversine_km(first, second)
+    countries = (first.get("country_code"), second.get("country_code"))
+    names = f"{first_name} {second_name}".lower()
+    airport_segment = any(token in names for token in ("機場", "空港", "airport"))
+    if all(countries) and countries[0] != countries[1] and not airport_segment:
+        distance += 50_000.0
+    return distance
+
+
+def _haversine_km(first: dict, second: dict) -> float:
+    lat1, lon1 = radians(first["latitude"]), radians(first["longitude"])
+    lat2, lon2 = radians(second["latitude"]), radians(second["longitude"])
+    delta_lat, delta_lon = lat2 - lat1, lon2 - lon1
+    value = sin(delta_lat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(delta_lon / 2) ** 2
+    return 2 * 6371.0 * asin(sqrt(value))
